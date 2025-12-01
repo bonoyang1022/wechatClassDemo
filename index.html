@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动态声波 - 微信公开课风格</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        /* 画布容器 */
+        .canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 三层画布：背景 + 文字下方线条 + 文字上方线条 */
+        #canvas-bg,
+        #canvas-lines-below,
+        #canvas-lines-above {
+            position: absolute;
+            top: 0;
+            left: 0;
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 中间文字层（固定在上下两层线条之间，通过分配线条到不同画布实现“穿插”效果） */
+        .center-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            pointer-events: none; /* 让鼠标事件穿透文字，不影响视觉 */
+            mix-blend-mode: normal; /* 可选：让文字与线条产生混合效果，类似原图 */
+        }
+
+        .year {
+            font-size: 3rem;
+            font-weight: 300;
+            line-height: 1;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .title {
+            font-size: 4rem;
+            font-weight: bold;
+            letter-spacing: 2px;
+            margin: 0;
+            line-height: 1.2;
+        }
+
+        .tag {
+            display: inline-block;
+            border: 2px solid white; /* 初始值，后续会由 JS 根据文字颜色动态更新 */
+            border-radius: 8px;
+            padding: 2px 10px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        /* 控制面板 */
+        .controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 280px;
+            background: rgba(50, 50, 50, 0.6);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 12px;
+            color: white;
+            z-index: 20;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.2);
+            font-size: 14px;
+            transition: width 0.3s ease, height 0.3s ease;
+        }
+
+        .controls.collapsed {
+            width: 200px;
+        }
+
+        .controls-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .controls-header h3 {
+            margin: 0;
+            border-bottom: 1px solid rgba(255,255,255,0.3);
+            padding-bottom: 5px;
+            flex: 1;
+        }
+
+        .controls.collapsed .controls-header {
+            margin-bottom: 0;
+        }
+
+        .controls-content {
+            transition: opacity 0.3s ease, max-height 0.3s ease;
+            overflow: hidden;
+            max-height: 2000px;
+        }
+
+        .controls.collapsed .controls-content {
+            max-height: 0;
+            opacity: 0;
+            margin: 0;
+            padding: 0;
+            pointer-events: none;
+        }
+
+        .btn-toggle {
+            width: 24px;
+            height: 24px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            margin-left: 10px;
+        }
+
+        .btn-toggle:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.5);
+        }
+
+        .control-group {
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .control-group label {
+            flex: 1;
+        }
+
+        .control-group input[type="range"] {
+            flex: 2;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+        
+        .control-group input[type="color"] {
+            border: none;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            background: none;
+        }
+
+        .color-pickers {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+
+        /* 单条线条控制行布局 */
+        .line-control-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 6px;
+        }
+
+        .line-control-row span {
+            font-size: 12px;
+            opacity: 0.8;
+            min-width: 40px;
+        }
+
+        .line-control-row input[type="color"] {
+            width: 26px;
+            height: 26px;
+        }
+
+        .line-control-row input[type="range"] {
+            flex: 1;
+        }
+
+        /* 加号和减号按钮样式 */
+        .btn-add, .btn-remove {
+            width: 24px;
+            height: 24px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .btn-add:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.5);
+        }
+
+        .btn-remove:hover {
+            background: rgba(255,100,100,0.3);
+            border-color: rgba(255,100,100,0.5);
+        }
+
+        .btn-add:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .btn-remove:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .add-line-container {
+            margin-top: 8px;
+            display: flex;
+            justify-content: center;
+        }
+
+        /* 文字层级控制按钮 */
+        .text-layer-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-arrow {
+            width: 28px;
+            height: 28px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        .btn-arrow:hover:not(:disabled) {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.5);
+        }
+
+        .btn-arrow:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .text-layer-value {
+            min-width: 30px;
+            text-align: center;
+            font-size: 13px;
+        }
+        
+    </style>
+</head>
+<body>
+
+    <!-- 控制面板 -->
+    <div class="controls" id="controlsPanel">
+        <div class="controls-header" id="controlsHeader">
+            <h3>参数调整</h3>
+            <button class="btn-toggle" id="btnToggleControls" title="收起/展开">−</button>
+        </div>
+        
+        <div class="controls-content" id="controlsContent">
+        <div class="control-group">
+            <label>背景颜色</label>
+            <input type="color" id="bgColor" value="#000000">
+        </div>
+
+        <div class="control-group">
+            <label>文字颜色</label>
+            <input type="color" id="textColor" value="#FFFFFF">
+        </div>
+
+        <div class="control-group">
+            <label>线条粗细</label>
+            <input type="range" id="lineWidth" min="1" max="50" value="20">
+        </div>
+
+        <div class="control-group">
+            <label>摆动幅度</label>
+            <input type="range" id="amplitude" min="10" max="300" value="120">
+        </div>
+
+        <div class="control-group">
+            <label>摆动速度</label>
+            <input type="range" id="speed" min="1" max="50" value="10">
+        </div>
+
+        <div class="control-group">
+            <label>随机扰动</label>
+            <input type="range" id="randomness" min="0" max="100" value="30">
+        </div>
+
+        <div class="control-group">
+            <label>文字层级</label>
+            <div class="text-layer-control">
+                <button class="btn-arrow" id="btnTextLayerDown" title="向下移动">↓</button>
+                <span class="text-layer-value" id="textLayerValue">最上层</span>
+                <button class="btn-arrow" id="btnTextLayerUp" title="向上移动">↑</button>
+            </div>
+        </div>
+
+        <div class="control-group" style="display:block;">
+            <label>线条设置（颜色 & 单条粗细）</label>
+            <div id="lineControls"></div>
+            <div class="add-line-container">
+                <button class="btn-add" id="btnAddLine" title="添加新线条">+</button>
+            </div>
+        </div>
+        </div>
+    </div>
+
+    <!-- 绘图区域 -->
+    <div class="canvas-container">
+        <canvas id="canvas-bg"></canvas>
+        <canvas id="canvas-lines-below"></canvas>
+        <!-- 悬浮文字内容（永远在两层线条之间，通过算法决定哪些线在上、哪些在线下） -->
+        <div class="center-content">
+            <span class="year">2026</span>
+            <h1 class="title">微信公开课</h1>
+            <div class="tag">PRO版</div>
+        </div>
+        <canvas id="canvas-lines-above"></canvas>
+    </div>
+
+    <script>
+        const canvasBg = document.getElementById('canvas-bg');
+        const ctxBg = canvasBg.getContext('2d');
+        const canvasLinesBelow = document.getElementById('canvas-lines-below');
+        const ctxLinesBelow = canvasLinesBelow.getContext('2d');
+        const canvasLinesAbove = document.getElementById('canvas-lines-above');
+        const ctxLinesAbove = canvasLinesAbove.getContext('2d');
+        const centerContent = document.querySelector('.center-content');
+        const centerTag = document.querySelector('.center-content .tag');
+
+        // 配置参数对象
+        const config = {
+            bgColor: '#000000',
+            textColor: '#FFFFFF',
+            lineWidth: 20,
+            baseAmplitude: 120,
+            speed: 0.01, // 基础速度系数
+            randomness: 0.3, // 随机因子
+            maxLines: 10, // 最大线条数量
+            textLayerIndex: 4, // 文字层级：0=所有线都在文字上方，lines.length=所有线都在文字下方，中间值表示有几条在线下
+            lines: [
+                { color: '#00C775', phase: 0, speedMod: 1.0, ampMod: 1.0, width: 1.0 },
+                { color: '#007AFF', phase: 2, speedMod: 0.8, ampMod: 0.9, width: 1.0 },
+                { color: '#8B5CF6', phase: 4, speedMod: 1.2, ampMod: 1.1, width: 1.0 },
+                { color: '#F5E026', phase: 1, speedMod: 0.9, ampMod: 0.8, width: 1.0 }
+            ]
+        };
+
+        let width, height, centerY;
+        let time = 0;
+
+        // 初始化画布尺寸
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+
+            const dpr = window.devicePixelRatio || 1;
+
+            // 背景画布
+            canvasBg.width = width * dpr;
+            canvasBg.height = height * dpr;
+            ctxBg.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            // 线条画布（下方）
+            canvasLinesBelow.width = width * dpr;
+            canvasLinesBelow.height = height * dpr;
+            ctxLinesBelow.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            // 线条画布（上方）
+            canvasLinesAbove.width = width * dpr;
+            canvasLinesAbove.height = height * dpr;
+            ctxLinesAbove.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            centerY = height / 2;
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 初始化文字颜色（包含“PRO版”边框）
+        if (centerContent) {
+            centerContent.style.color = config.textColor;
+        }
+        if (centerTag) {
+            centerTag.style.borderColor = config.textColor;
+        }
+
+        // 控制面板收起/展开切换
+        const controlsPanel = document.getElementById('controlsPanel');
+        const btnToggleControls = document.getElementById('btnToggleControls');
+        const controlsHeader = document.getElementById('controlsHeader');
+        
+        function toggleControls() {
+            controlsPanel.classList.toggle('collapsed');
+            btnToggleControls.textContent = controlsPanel.classList.contains('collapsed') ? '+' : '−';
+        }
+        
+        btnToggleControls.addEventListener('click', (e) => {
+            e.stopPropagation(); // 阻止事件冒泡
+            toggleControls();
+        });
+        
+        // 点击标题栏也可以切换
+        controlsHeader.addEventListener('click', (e) => {
+            if (e.target !== btnToggleControls) {
+                toggleControls();
+            }
+        });
+
+        // 绑定UI控件事件
+        document.getElementById('bgColor').addEventListener('input', (e) => config.bgColor = e.target.value);
+        document.getElementById('textColor').addEventListener('input', (e) => {
+            config.textColor = e.target.value;
+            if (centerContent) {
+                centerContent.style.color = config.textColor;
+            }
+            if (centerTag) {
+                centerTag.style.borderColor = config.textColor;
+            }
+        });
+        document.getElementById('lineWidth').addEventListener('input', (e) => config.lineWidth = parseInt(e.target.value));
+        document.getElementById('amplitude').addEventListener('input', (e) => config.baseAmplitude = parseInt(e.target.value));
+        document.getElementById('speed').addEventListener('input', (e) => config.speed = parseInt(e.target.value) / 1000);
+        document.getElementById('randomness').addEventListener('input', (e) => config.randomness = parseInt(e.target.value) / 100);
+
+        // 添加新线条按钮
+        document.getElementById('btnAddLine').addEventListener('click', () => {
+            if (config.lines.length < config.maxLines) {
+                const index = config.lines.length;
+                config.lines.push({
+                    color: defaultColors[index % defaultColors.length],
+                    phase: index * 1.5,
+                    speedMod: 1.0,
+                    ampMod: 1.0,
+                    width: 1.0
+                });
+                updateLineControlsUI();
+                // 新增线条后，自动把文字层级重置为“最上层”
+                config.textLayerIndex = config.lines.length;
+                updateTextLayerUI();
+            }
+        });
+
+        // 默认颜色列表，用于新增线条时循环使用
+        const defaultColors = ['#00C775', '#007AFF', '#8B5CF6', '#F5E026', '#FF6B6B', '#FFA500', '#00CED1', '#FF69B4', '#7CFC00', '#1E90FF'];
+
+
+        // 刷新右侧每条线条的控制 UI（颜色 + 单条粗细）
+        function updateLineControlsUI() {
+            const container = document.getElementById('lineControls');
+            const btnAdd = document.getElementById('btnAddLine');
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            for (let i = 0; i < config.lines.length; i++) {
+                const line = config.lines[i];
+
+                const row = document.createElement('div');
+                row.className = 'line-control-row';
+
+                const label = document.createElement('span');
+                label.textContent = `第${i + 1}条`;
+
+                const colorInput = document.createElement('input');
+                colorInput.type = 'color';
+                colorInput.value = line.color;
+                colorInput.addEventListener('input', (e) => {
+                    line.color = e.target.value;
+                });
+
+                const widthInput = document.createElement('input');
+                widthInput.type = 'range';
+                widthInput.min = '0.5';
+                widthInput.max = '2';
+                widthInput.step = '0.1';
+                widthInput.value = line.width != null ? line.width : 1.0;
+                widthInput.addEventListener('input', (e) => {
+                    const v = parseFloat(e.target.value);
+                    line.width = isNaN(v) ? 1.0 : v;
+                });
+
+                // 减号按钮
+                const btnRemove = document.createElement('button');
+                btnRemove.className = 'btn-remove';
+                btnRemove.textContent = '−';
+                btnRemove.title = '删除此线条';
+                btnRemove.disabled = config.lines.length <= 1; // 至少保留1条
+                btnRemove.addEventListener('click', () => {
+                    if (config.lines.length > 1) {
+                        config.lines.splice(i, 1);
+                        // 更新文字层级（因为线条数量变了，防止越界）
+                        if (config.textLayerIndex > config.lines.length) {
+                            config.textLayerIndex = config.lines.length;
+                        }
+                        updateLineControlsUI();
+                        updateTextLayerUI();
+                    }
+                });
+
+                row.appendChild(label);
+                row.appendChild(colorInput);
+                row.appendChild(widthInput);
+                row.appendChild(btnRemove);
+
+                container.appendChild(row);
+            }
+
+            // 更新加号按钮状态
+            if (btnAdd) {
+                btnAdd.disabled = config.lines.length >= config.maxLines;
+            }
+        }
+
+        // 更新文字层级显示和按钮状态（决定有多少条线在文字下方，其余在文字上方）
+        function updateTextLayerUI() {
+            const btnUp = document.getElementById('btnTextLayerUp');
+            const btnDown = document.getElementById('btnTextLayerDown');
+            const valueSpan = document.getElementById('textLayerValue');
+            
+            if (!btnUp || !btnDown || !valueSpan || !centerContent) return;
+            
+            const maxLayer = config.lines.length; // 最上层 = 所有线都在文字下方
+            const minLayer = 0; // 最下层 = 所有线都在文字上方
+            
+            // 更新按钮状态
+            btnUp.disabled = config.textLayerIndex >= maxLayer;
+            btnDown.disabled = config.textLayerIndex <= minLayer;
+            
+            // 更新显示文本（描述当前有多少条线在文字下方）
+            if (config.textLayerIndex === maxLayer) {
+                valueSpan.textContent = '最上层';
+            } else if (config.textLayerIndex === minLayer) {
+                valueSpan.textContent = '最下层';
+            } else {
+                valueSpan.textContent = `下方${config.textLayerIndex}条`;
+            }
+        }
+
+        // 文字层级控制按钮
+        document.getElementById('btnTextLayerUp').addEventListener('click', () => {
+            const maxLayer = config.lines.length;
+            if (config.textLayerIndex < maxLayer) {
+                config.textLayerIndex++;
+                updateTextLayerUI();
+            }
+        });
+
+        document.getElementById('btnTextLayerDown').addEventListener('click', () => {
+            const minLayer = 0;
+            if (config.textLayerIndex > minLayer) {
+                config.textLayerIndex--;
+                updateTextLayerUI();
+            }
+        });
+
+        // 初始化线条控制 UI 与文字层级
+        updateLineControlsUI();
+        config.textLayerIndex = config.lines.length; // 初始为“最上层”：所有线都在文字下方
+        updateTextLayerUI();
+
+        // 动画循环
+        function animate() {
+            // 1. 清空背景画布并填充背景
+            ctxBg.fillStyle = config.bgColor;
+            ctxBg.fillRect(0, 0, width, height);
+
+            // 2. 清空上下两层线条画布
+            ctxLinesBelow.clearRect(0, 0, width, height);
+            ctxLinesAbove.clearRect(0, 0, width, height);
+
+            // 3. 遍历绘制每一根线，根据 textLayerIndex 决定画到上层还是下层
+            config.lines.forEach((line, index) => {
+                const ctx = index < config.textLayerIndex ? ctxLinesBelow : ctxLinesAbove;
+
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                ctx.strokeStyle = line.color;
+                // 每条线条的实际粗细 = 全局粗细 * 单条系数
+                ctx.lineWidth = config.lineWidth * (line.width != null ? line.width : 1.0);
+
+                // 随机扰动计算：利用 randomness 参数动态改变每根线的振幅和频率
+                // 使用 Math.sin(time) 让扰动也是平滑变化的，而不是抖动
+                const currentAmp = config.baseAmplitude * line.ampMod * (1 + Math.sin(time * 0.5 + index) * config.randomness);
+                
+                // 绘制正弦波
+                // step 越小线条越平滑，但性能开销越大
+                for (let x = 0; x <= width; x += 5) {
+                    // 归一化坐标 (0 到 1)
+                    const t = x / width;
+                    
+                    // **核心算法：包络函数**
+                    // 使用 sin(PI * t) 使得 t=0 和 t=1 时值为 0，中间为 1
+                    // 这样线条两端就会固定在中心点
+                    const envelope = Math.sin(t * Math.PI);
+
+                    // 波形公式：y = sin(x * 频率 + 时间 * 速度) * 振幅 * 包络
+                    // 频率设为 2 * PI 表示在屏幕宽度内大概画一个完整的波
+                    const waveY = Math.sin(t * Math.PI * 2 + line.phase + time * line.speedMod) * currentAmp * envelope;
+                    
+                    ctx.lineTo(x, centerY + waveY);
+                }
+                ctx.stroke();
+            });
+
+            // 更新时间
+            time += config.speed * 5; // 乘数用于调整基础时间流逝速度
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+
+    </script>
+</body>
+</html>
